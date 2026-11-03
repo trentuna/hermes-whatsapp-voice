@@ -742,7 +742,6 @@ pub async fn probe() -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(25);
     let mut audio_samples = 0usize;
     let mut transcript = String::new();
-    let mut tool = String::new();
     println!("provider=grok");
     println!("event=session.created");
     while Instant::now() < deadline {
@@ -756,8 +755,7 @@ pub async fn probe() -> Result<()> {
                 );
             }
             Ok(Some(LiveEvent::ToolCall { name, .. })) => {
-                tool = name;
-                println!("event=tool_call name={tool}");
+                println!("event=tool_call name={name}");
             }
             Ok(Some(LiveEvent::Interrupted)) => println!("event=interrupted"),
             Ok(Some(LiveEvent::Closed(why))) => bail!("provider=grok closed: {why}"),
