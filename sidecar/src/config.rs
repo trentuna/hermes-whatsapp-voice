@@ -110,6 +110,16 @@ fn voice_provider() -> Result<String> {
     Ok(value)
 }
 
+/// The Gemini key is only meaningful for the Gemini provider: a Grok-only install must boot
+/// without any Google credential.
+fn gemini_key_for(provider: &str, key: &str) -> Result<String> {
+    let key = key.trim();
+    if provider == "gemini" && key.is_empty() {
+        bail!("GEMINI_API_KEY is not set; voice_provider=gemini needs a Gemini API key");
+    }
+    Ok(key.to_string())
+}
+
 fn live_config(raw: &str) -> Result<serde_json::Value> {
     let value: serde_json::Value =
         serde_json::from_str(raw).context("live_config is not valid JSON")?;
@@ -131,6 +141,7 @@ impl Config {
 
     pub fn from_env() -> Result<Self> {
         let owner = digits(&required("HWV_OWNER")?);
+        let provider = voice_provider()?;
         let listen = var("HWV_LISTEN", "127.0.0.1:8796");
         // The API's bearer token travels over plain HTTP, so it must never leave this machine.
         if !listen
@@ -146,7 +157,7 @@ impl Config {
             owner,
             listen,
             token: required("HWV_TOKEN")?,
-            gemini_api_key: required("GEMINI_API_KEY")?,
+            gemini_api_key: gemini_key_for(&provider, &var("GEMINI_API_KEY", ""))?,
             gemini_url: var("HWV_GEMINI_URL", crate::gemini::ENDPOINT),
             model: var("HWV_MODEL", "gemini-3.8-live"),
             voice: var("HWV_VOICE", "Kore"),
@@ -177,7 +188,7 @@ impl Config {
             send_summary: var("HWV_SEND_SUMMARY", "true") == "true",
             context_url: var("HWV_CONTEXT_URL", "").trim_end_matches('/').to_string(),
             vocabulary: list(&var("HWV_VOCABULARY", "")),
-            voice_provider: voice_provider()?,
+            voice_provider: provider,
             grok_model: var("HWV_GROK_MODEL", "grok-voice-latest"),
             grok_voice: var("HWV_GROK_VOICE", "ara"),
             xai_api_key: var("XAI_API_KEY", ""),
@@ -208,6 +219,14 @@ mod tests {
         assert_eq!(live_config("{}").unwrap(), serde_json::json!({}));
         assert!(live_config("[1]").is_err());
         assert!(live_config("{bad").is_err());
+    }
+
+    #[test]
+    fn gemini_key_is_only_required_for_gemini() {
+        assert_eq!(gemini_key_for("grok", "").unwrap(), "");
+        assert_eq!(gemini_key_for("grok", " g-key ").unwrap(), "g-key");
+        assert!(gemini_key_for("gemini", "   ").is_err());
+        assert_eq!(gemini_key_for("gemini", "g-key").unwrap(), "g-key");
     }
 
     #[test]

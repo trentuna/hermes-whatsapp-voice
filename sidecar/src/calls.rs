@@ -840,15 +840,12 @@ impl Bridge {
         }
     }
 
+    /// The owner's chosen provider answers, and only it: no cross-provider fallback, so a
+    /// Grok-only install needs no Gemini key and a Grok failure is reported as a Grok failure.
     async fn connect_voice(&self, setup: Setup) -> Result<(Voice, &'static str)> {
         if self.cfg.voice_provider == "grok" {
-            match GrokLive::connect(&self.cfg, setup.clone()).await {
-                Ok(live) => return Ok((Voice::Grok(live), "grok")),
-                Err(e) if self.cfg.gemini_api_key.is_empty() => return Err(e),
-                Err(e) => {
-                    log::error!("provider=grok connect failed, falling back to gemini: {e:#}");
-                }
-            }
+            let live = GrokLive::connect(&self.cfg, setup).await?;
+            return Ok((Voice::Grok(live), "grok"));
         }
         let live =
             GeminiLive::connect(&self.cfg.gemini_url, &self.cfg.gemini_api_key, setup).await?;
@@ -1099,22 +1096,10 @@ impl Bridge {
                         }
                     }
                     Some(LiveEvent::Closed(why)) => break (format!("voice model disconnected: {why}"), "voice_model"),
+                    // A provider that asked for a fallback is done: with no cross-provider
+                    // fallback the call ends here instead of silently switching to Gemini.
                     Some(LiveEvent::Fallback(why)) => {
-                        if self.cfg.gemini_api_key.is_empty() {
-                            break (format!("voice model disconnected: {why}"), "voice_model");
-                        }
-                        log::error!("call {id}: provider=grok falling back to gemini: {why}");
-                        match GeminiLive::connect(&self.cfg.gemini_url, &self.cfg.gemini_api_key, self.setup(&info.context)).await {
-                            Ok(next) => {
-                                live = Voice::Gemini(next);
-                                live.send_text("(The call is still connected. Continue from where you left off.)");
-                                log::info!("call {id}: provider=gemini fallback=grok");
-                            }
-                            Err(e) => {
-                                log::error!("call {id}: gemini fallback failed: {e:#}");
-                                break (format!("voice model disconnected: {why}"), "voice_model");
-                            }
-                        }
+                        break (format!("voice model disconnected: {why}"), "voice_model");
                     }
                     None => break ("voice model stopped".to_string(), "voice_model"),
                 },

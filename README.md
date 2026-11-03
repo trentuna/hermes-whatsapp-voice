@@ -103,7 +103,8 @@ transcript and timing (`hermes whatsapp-voice calls`).
 - Hermes `>= 0.21.6` on Linux or macOS.
 - A separate WhatsApp number for the bot: Hermes's WhatsApp `bot` mode, or any spare number. In
   `self-chat` mode the bot is your own number, and you can't call yourself.
-- Gemini set up in Hermes with an API key. The plugin reuses the key of Hermes's Gemini provider
+- A key for the provider that answers: with `voice_provider: gemini` (the default) a Gemini key set
+  up in Hermes. The plugin reuses the key of Hermes's Gemini provider
   (`GOOGLE_API_KEY`, else `GEMINI_API_KEY`), so there is nothing extra to enter. Without one,
   `hermes model` (choose Gemini) adds it. Google login (Cloud Code OAuth) does not work for the
   Live API. The live models have a free tier, but Google may use free-tier data. On the paid tier a

@@ -136,6 +136,17 @@ def test_sidecar_env(plugin):
     assert oct(token_file.stat().st_mode & 0o777) == "0o600"
 
 
+def test_gemini_key_only_needed_when_gemini_answers(plugin, monkeypatch):
+    import conftest
+
+    monkeypatch.delitem(conftest.SECRETS, "GOOGLE_API_KEY", raising=False)
+    monkeypatch.delitem(conftest.SECRETS, "GEMINI_API_KEY", raising=False)
+    # grok answers the call, so no Google credential is required.
+    plugin.cli.check_provider_keys({"voice_provider": "grok"})
+    with pytest.raises(SystemExit):
+        plugin.cli.check_provider_keys({"voice_provider": "gemini"})
+
+
 def test_gemini_key_follows_hermes_provider_order(plugin, monkeypatch):
     import conftest
 

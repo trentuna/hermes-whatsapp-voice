@@ -114,7 +114,9 @@ session with the bot to exist (send it one text first).
 ## Credentials
 
 The plugin never asks for its own keys. It reuses what Hermes already has:
-- **Gemini:** the key of Hermes's Gemini provider, `GOOGLE_API_KEY`, else `GEMINI_API_KEY`, from
+- **Gemini** (only when `voice_provider: gemini`, the default; a `grok` install needs `XAI_API_KEY`
+  and no Google credential, and there is no cross-provider fallback): the key of Hermes's Gemini
+  provider, `GOOGLE_API_KEY`, else `GEMINI_API_KEY`, from
   Hermes's `.env` (`~/.hermes/.env` by default). Add one with `hermes model` (choose Gemini). Google login (Cloud Code OAuth)
   doesn't work for the Live API.
 - **Hermes API server:** `API_SERVER_KEY` from Hermes's `.env`. Without it, calls still work but

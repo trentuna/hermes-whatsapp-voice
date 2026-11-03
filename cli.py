@@ -56,17 +56,26 @@ def _install(args) -> None:
     print("Next: hermes whatsapp-voice pair")
 
 
-def _require_ready(ctx) -> Path:
-    if not settings(ctx)["owner_number"]:
-        raise SystemExit(
-            "Set your number first: hermes config set plugins.entries.hermes-whatsapp-voice.settings.owner_number +15551234567"
-        )
+def check_provider_keys(s) -> None:
+    """Only the provider that answers the call needs a key: grok needs XAI_API_KEY, not Google."""
+    if s["voice_provider"] != "gemini":
+        return
     if not gemini_key():
         raise SystemExit(
-            "No Gemini API key found. This plugin reuses the key of Hermes's Gemini provider "
-            "(GOOGLE_API_KEY or GEMINI_API_KEY in ~/.hermes/.env). Add one with `hermes model` "
-            "(choose Gemini) or put it in ~/.hermes/.env."
+            "No Gemini API key found while voice_provider=gemini. This provider reuses the key of "
+            "Hermes's Gemini provider (GOOGLE_API_KEY or GEMINI_API_KEY in ~/.hermes/.env). Add one "
+            "with `hermes model` (choose Gemini) or put it in ~/.hermes/.env; with "
+            "voice_provider=grok no Gemini key is needed."
         )
+
+
+def _require_ready(ctx) -> Path:
+    s = settings(ctx)
+    if not s["owner_number"]:
+        raise SystemExit(
+            "Set your number first: hermes config set plugins.entries.hermes-whatsapp-voice.settings.owner_number +155****4567"
+        )
+    check_provider_keys(s)
     exe = binary_path()
     if not exe.exists():
         # First run: fetch the prebuilt sidecar so nobody needs a Rust toolchain.
