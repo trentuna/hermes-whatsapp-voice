@@ -26,6 +26,9 @@ SETTINGS: dict[str, Any] = {
     "owner_number": "",
     "voice_model": "gemini-3.8-live",
     "voice": "Kore",
+    "voice_provider": "gemini",
+    "grok_model": "grok-voice-latest",
+    "grok_voice": "ara",
     "assistant_name": "Hermes",
     "languages": "",
     "speech_language": "",
@@ -160,6 +163,9 @@ def sidecar_env(ctx) -> dict[str, str]:
         "HWV_OWNER": str(s["owner_number"]),
         "HWV_MODEL": str(s["voice_model"]),
         "HWV_VOICE": str(s["voice"]),
+        "HWV_VOICE_PROVIDER": str(s["voice_provider"]),
+        "HWV_GROK_MODEL": str(s["grok_model"]),
+        "HWV_GROK_VOICE": str(s["grok_voice"]),
         "HWV_ASSISTANT_NAME": str(s["assistant_name"]),
         "HWV_LANGUAGES": str(s["languages"]),
         "HWV_SPEECH_LANGUAGE": str(s["speech_language"]),
@@ -183,6 +189,7 @@ def sidecar_env(ctx) -> dict[str, str]:
         "HWV_TOKEN": token(create=True),
         "HERMES_API_URL": str(s["hermes_api_url"]),
         "GEMINI_API_KEY": gemini_key(),
+        "XAI_API_KEY": get_secret("XAI_API_KEY") or "",
         "HERMES_API_KEY": get_secret("API_SERVER_KEY") or "",
     }
     return env

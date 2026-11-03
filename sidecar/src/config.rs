@@ -52,6 +52,14 @@ pub struct Config {
     pub context_url: String,
     /// Words transcription should spell as given (names).
     pub vocabulary: Vec<String>,
+    /// "grok" or "gemini".
+    pub voice_provider: String,
+    pub grok_model: String,
+    pub grok_voice: String,
+    /// xAI API key (XAI_API_KEY). Preferred over the OAuth store; empty falls back to it.
+    pub xai_api_key: String,
+    /// Host home that holds auth.json. Read-only, only used when no API key is set.
+    pub hermes_home: PathBuf,
 }
 
 pub(crate) fn list(raw: &str) -> Vec<String> {
@@ -94,6 +102,14 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
         _ => bail!("bad duration unit in {s:?}"),
     };
     Ok(Duration::from_secs(secs))
+}
+
+fn voice_provider() -> Result<String> {
+    let value = var("HWV_VOICE_PROVIDER", "gemini").to_ascii_lowercase();
+    if value != "grok" && value != "gemini" {
+        bail!("HWV_VOICE_PROVIDER must be grok or gemini");
+    }
+    Ok(value)
 }
 
 fn live_config(raw: &str) -> Result<serde_json::Value> {
@@ -163,6 +179,11 @@ impl Config {
             send_summary: var("HWV_SEND_SUMMARY", "true") == "true",
             context_url: var("HWV_CONTEXT_URL", "").trim_end_matches('/').to_string(),
             vocabulary: list(&var("HWV_VOCABULARY", "")),
+            voice_provider: voice_provider()?,
+            grok_model: var("HWV_GROK_MODEL", "grok-voice-latest"),
+            grok_voice: var("HWV_GROK_VOICE", "ara"),
+            xai_api_key: var("XAI_API_KEY", ""),
+            hermes_home: PathBuf::from(var("HERMES_HOME", "/opt/data")),
         })
     }
 
