@@ -410,6 +410,10 @@ fn test_config(gemini_url: &str, hermes_url: &str) -> Config {
         send_summary: true,
         context_url: String::new(),
         vocabulary: vec![],
+        voice_provider: "gemini".into(),
+        grok_model: "grok-voice-latest".into(),
+        grok_voice: "ara".into(),
+        xai_api_key: String::new(),
     }
 }
 
