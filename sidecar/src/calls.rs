@@ -129,7 +129,9 @@ impl Voice {
     fn add_context(&self, text: &str) {
         match self {
             Voice::Gemini(live) => live.add_context(text),
-            Voice::Grok(live) => live.send_text(&format!("(Context for you, do not reply: {text})")),
+            Voice::Grok(live) => {
+                live.send_text(&format!("(Context for you, do not reply: {text})"))
+            }
         }
     }
 }
@@ -848,7 +850,8 @@ impl Bridge {
                 }
             }
         }
-        let live = GeminiLive::connect(&self.cfg.gemini_url, &self.cfg.gemini_api_key, setup).await?;
+        let live =
+            GeminiLive::connect(&self.cfg.gemini_url, &self.cfg.gemini_api_key, setup).await?;
         Ok((Voice::Gemini(live), "gemini"))
     }
 

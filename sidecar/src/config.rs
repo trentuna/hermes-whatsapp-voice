@@ -56,10 +56,8 @@ pub struct Config {
     pub voice_provider: String,
     pub grok_model: String,
     pub grok_voice: String,
-    /// xAI API key (XAI_API_KEY). Preferred over the OAuth store; empty falls back to it.
+    /// xAI API key (XAI_API_KEY). The only grok credential: the host OAuth store is never read.
     pub xai_api_key: String,
-    /// Host home that holds auth.json. Read-only, only used when no API key is set.
-    pub hermes_home: PathBuf,
 }
 
 pub(crate) fn list(raw: &str) -> Vec<String> {
@@ -183,7 +181,6 @@ impl Config {
             grok_model: var("HWV_GROK_MODEL", "grok-voice-latest"),
             grok_voice: var("HWV_GROK_VOICE", "ara"),
             xai_api_key: var("XAI_API_KEY", ""),
-            hermes_home: PathBuf::from(var("HERMES_HOME", "/opt/data")),
         })
     }
 

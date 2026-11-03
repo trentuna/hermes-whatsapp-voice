@@ -192,10 +192,7 @@ async fn serve() -> Result<()> {
     if bridge.cfg.hermes_api_key.is_empty() {
         log::warn!("API_SERVER_KEY not set: calls work, but the voice agent cannot reach Hermes");
     }
-    log::info!(
-        "ple-1166-grok-voice provider={}",
-        bridge.cfg.voice_provider
-    );
+    log::info!("ple-1166-grok-voice provider={}", bridge.cfg.voice_provider);
     tokio::spawn({
         let bridge = bridge.clone();
         async move { bridge.refresh_persona().await }

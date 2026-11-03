@@ -1,17 +1,16 @@
 //! Grok realtime voice client for WhatsApp calls.
 //!
-//! Wire and auth follow hermes-talk `talk_grok_realtime.py` and `talk_grok_auth.py`:
-//! the host `xai-oauth` login is read and never refreshed or rewritten. A metered
-//! xAI API key is never used. Call audio is 16 kHz; Grok PCM is 24 kHz.
+//! Wire format follows hermes-talk `talk_grok_realtime.py`. Auth is the metered xAI API
+//! key from `XAI_API_KEY` only: the host OAuth store (`auth.json`) is never read, so a
+//! missing key fails loudly instead of falling back. Call audio is 16 kHz; Grok PCM 24 kHz.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
-use base64::engine::general_purpose::{STANDARD as B64, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::STANDARD as B64;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
@@ -35,8 +34,8 @@ const RENEW_AFTER: Duration = Duration::from_secs(12 * 60);
 
 const GROK_VOICES: &[&str] = &[
     "ara", "rex", "sal", "eve", "leo", "carina", "zagan", "helix", "orion", "luna", "iris",
-    "altair", "zenith", "perseus", "helios", "lux", "kepler", "rigel", "cosmo", "celeste",
-    "ursa", "sirius", "lumen", "castor", "naksh", "atlas", "aurora", "liora",
+    "altair", "zenith", "perseus", "helios", "lux", "kepler", "rigel", "cosmo", "celeste", "ursa",
+    "sirius", "lumen", "castor", "naksh", "atlas", "aurora", "liora",
 ];
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -58,38 +57,21 @@ impl Live {
         let model = grok_model(cfg);
         let voice = grok_voice(cfg);
         let token = auth_token(cfg)?;
-        let ws = match open_session(
-            &token,
-            &model,
-            None,
-            &session_update(&setup, &voice, true),
-        )
-        .await
+        let ws = match open_session(&token, &model, None, &session_update(&setup, &voice, true))
+            .await
         {
             Ok(ws) => ws,
             Err(e) => {
-                log::warn!("provider=grok full session.update failed, retrying minimal shape: {e:#}");
-                open_session(
-                    &token,
-                    &model,
-                    None,
-                    &session_update(&setup, &voice, false),
-                )
-                .await?
+                log::warn!(
+                    "provider=grok full session.update failed, retrying minimal shape: {e:#}"
+                );
+                open_session(&token, &model, None, &session_update(&setup, &voice, false)).await?
             }
         };
         log::info!("provider=grok voice={voice} model={model}");
         let (outbox, out_rx) = mpsc::unbounded_channel();
         let (ev_tx, events) = mpsc::unbounded_channel();
-        let task = tokio::spawn(run(
-            token.clone(),
-            model,
-            setup,
-            voice,
-            ws,
-            out_rx,
-            ev_tx,
-        ));
+        let task = tokio::spawn(run(token.clone(), model, setup, voice, ws, out_rx, ev_tx));
         Ok(Self {
             outbox,
             events,
@@ -121,9 +103,9 @@ impl Live {
             },
         });
         let _ = self.outbox.send(Outgoing::Control(item.to_string()));
-        let _ = self
-            .outbox
-            .send(Outgoing::Control(json!({"type": "response.create"}).to_string()));
+        let _ = self.outbox.send(Outgoing::Control(
+            json!({"type": "response.create"}).to_string(),
+        ));
     }
 
     /// `scheduling` "SILENT" submits the tool result without asking Grok to speak.
@@ -139,9 +121,9 @@ impl Live {
         });
         let _ = self.outbox.send(Outgoing::Control(item.to_string()));
         if scheduling != "SILENT" {
-            let _ = self
-                .outbox
-                .send(Outgoing::Control(json!({"type": "response.create"}).to_string()));
+            let _ = self.outbox.send(Outgoing::Control(
+                json!({"type": "response.create"}).to_string(),
+            ));
         }
     }
 }
@@ -206,9 +188,10 @@ fn instructions(instructions: &str) -> String {
 }
 
 fn tool_wire(tool: &Value) -> Value {
-    let mut parameters = tool.get("parameters").cloned().unwrap_or_else(|| {
-        json!({"type": "object", "properties": {}})
-    });
+    let mut parameters = tool
+        .get("parameters")
+        .cloned()
+        .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
     if !parameters.is_object() {
         parameters = json!({"type": "object", "properties": {}});
     }
@@ -220,7 +203,7 @@ fn tool_wire(tool: &Value) -> Value {
     })
 }
 
-/// OpenAI-GA session update that xAI accepts, plus resumption and an English hint.
+/// OpenAI-GA session update that xAI accepts, plus resumption and a speech-language hint.
 pub fn session_update(setup: &Setup, voice: &str, full: bool) -> Value {
     let mut input = json!({
         "format": {"type": "audio/pcm", "rate": 24000},
@@ -344,77 +327,6 @@ fn decode_pcm(data: &str) -> Option<Vec<i16>> {
     Some(le_bytes_to_i16(&bytes))
 }
 
-fn hermes_home_default() -> PathBuf {
-    std::env::var_os("HERMES_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".hermes")))
-        .unwrap_or_else(|| PathBuf::from("/opt/data"))
-}
-
-fn b64url(data: &str) -> Option<Vec<u8>> {
-    URL_SAFE_NO_PAD
-        .decode(data.trim_end_matches('='))
-        .ok()
-}
-
-fn jwt_expired(token: &str, now: i64) -> bool {
-    let mut parts = token.split('.');
-    let Some(_header) = parts.next() else {
-        return true;
-    };
-    let Some(payload) = parts.next() else {
-        return true;
-    };
-    let Some(bytes) = b64url(payload) else {
-        return true;
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-        return true;
-    };
-    let Some(exp) = value.get("exp").and_then(|v| v.as_i64()) else {
-        return true;
-    };
-    exp <= now + 60
-}
-
-fn token_pair(tokens: &Value) -> Option<String> {
-    let access = tokens.get("access_token")?.as_str()?.trim();
-    let refresh = tokens.get("refresh_token")?.as_str()?.trim();
-    if access.is_empty() || refresh.is_empty() {
-        return None;
-    }
-    Some(access.to_string())
-}
-
-/// Read-only. Never refreshes and never writes auth.json. Never returns an API key.
-pub fn read_oauth_access_token(home: &Path, now: i64) -> Result<String> {
-    let path = home.join("auth.json");
-    let raw = std::fs::read_to_string(&path).context("xai-oauth store unreadable")?;
-    let data: Value = serde_json::from_str(&raw).context("xai-oauth store is not JSON")?;
-    let token = token_pair(&data["providers"]["xai-oauth"]["tokens"])
-        .or_else(|| {
-            data["credential_pool"]["xai-oauth"]
-                .as_array()
-                .and_then(|rows| {
-                    rows.iter().find_map(|row| {
-                        token_pair(row).or_else(|| token_pair(&row["tokens"]))
-                    })
-                })
-        })
-        .context("no usable xai-oauth login")?;
-    if jwt_expired(&token, now) {
-        bail!("xai-oauth access token is expired; not refreshing and not using an API key");
-    }
-    Ok(token)
-}
-
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 fn redact(msg: impl AsRef<str>, secret: &str) -> String {
     let msg = msg.as_ref();
     if secret.len() < 8 {
@@ -468,13 +380,17 @@ fn query_escape(s: &str) -> String {
     out
 }
 
-/// The xAI API key when the owner set one, otherwise the host's xAI OAuth login (read-only).
+/// The metered xAI API key. Key only: the host OAuth store is never consulted.
 pub fn auth_token(cfg: &Config) -> Result<String> {
-    let key = cfg.xai_api_key.trim();
-    if !key.is_empty() {
-        return Ok(key.to_string());
+    require_api_key(&cfg.xai_api_key)
+}
+
+fn require_api_key(key: &str) -> Result<String> {
+    let key = key.trim();
+    if key.is_empty() {
+        bail!("XAI_API_KEY is not set; voice_provider=grok needs a metered xAI API key");
     }
-    read_oauth_access_token(&cfg.hermes_home, now_secs())
+    Ok(key.to_string())
 }
 
 async fn open_session(
@@ -769,7 +685,6 @@ async fn run(
 
 /// Non-ringing wire check. Prints provider=grok and event names. Never prints a token.
 pub async fn probe() -> Result<()> {
-    let home = hermes_home_default();
     let setup = Setup {
         model: DEFAULT_MODEL.into(),
         voice: DEFAULT_VOICE.into(),
@@ -807,7 +722,6 @@ pub async fn probe() -> Result<()> {
         voice_provider: "grok".into(),
         grok_model: DEFAULT_MODEL.into(),
         grok_voice: DEFAULT_VOICE.into(),
-        hermes_home: home,
     };
     let mut live = Live::connect(&cfg, setup).await?;
     live.send_text("Say the single word ready.");
@@ -822,7 +736,10 @@ pub async fn probe() -> Result<()> {
             Ok(Some(LiveEvent::Audio(pcm))) => audio_samples += pcm.len(),
             Ok(Some(LiveEvent::OutputTranscript(t))) => {
                 transcript = t;
-                println!("event=output_transcript chars={}", transcript.chars().count());
+                println!(
+                    "event=output_transcript chars={}",
+                    transcript.chars().count()
+                );
             }
             Ok(Some(LiveEvent::ToolCall { name, .. })) => {
                 tool = name;
@@ -865,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn session_update_maps_tools_and_english() {
+    fn session_update_maps_tools_and_passes_instructions_verbatim() {
         let msg = session_update(&setup(), "ara", true);
         assert_eq!(msg["type"], "session.update");
         assert_eq!(msg["session"]["audio"]["output"]["voice"], "xai_ara");
@@ -873,12 +790,9 @@ mod tests {
         assert_eq!(msg["session"]["resumption"]["enabled"], true);
         assert_eq!(msg["session"]["tools"][0]["name"], "end_call");
         assert!(msg["session"]["tools"][0].get("behavior").is_none());
-        assert!(
-            msg["session"]["instructions"]
-                .as_str()
-                .unwrap()
-                .contains("Speak English only.")
-        );
+        let instructions = msg["session"]["instructions"].as_str().unwrap();
+        assert_eq!(instructions, "Be brief.");
+        assert!(!instructions.to_ascii_lowercase().contains("english only"));
     }
 
     #[test]
@@ -928,49 +842,9 @@ mod tests {
     }
 
     #[test]
-    fn oauth_reader_rejects_expired_and_missing_refresh() {
-        let header = B64URL_header();
-        let future = now_secs() + 3600;
-        let past = now_secs() - 120;
-        let good = format!("{header}.{}", b64url_json(&json!({"exp": future})));
-        let bad = format!("{header}.{}", b64url_json(&json!({"exp": past})));
-        let dir = std::env::temp_dir().join(format!("hwv-grok-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("auth.json");
-        std::fs::write(
-            &path,
-            json!({
-                "providers": {"xai-oauth": {"tokens": {
-                    "access_token": good,
-                    "refresh_token": "refresh-present",
-                }}},
-            })
-            .to_string(),
-        )
-        .unwrap();
-        assert!(read_oauth_access_token(&dir, now_secs()).is_ok());
-        std::fs::write(
-            &path,
-            json!({
-                "providers": {"xai-oauth": {"tokens": {
-                    "access_token": bad,
-                    "refresh_token": "refresh-present",
-                }}},
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let err = read_oauth_access_token(&dir, now_secs()).unwrap_err();
-        assert!(err.to_string().contains("expired"), "{err}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    fn B64URL_header() -> String {
-        URL_SAFE_NO_PAD.encode(br#"{"alg":"none"}"#)
-    }
-
-    fn b64url_json(value: &Value) -> String {
-        URL_SAFE_NO_PAD.encode(value.to_string().as_bytes())
+    fn auth_token_is_key_only() {
+        assert_eq!(require_api_key(" xai-abc ").unwrap(), "xai-abc");
+        let err = require_api_key("   ").unwrap_err();
+        assert!(err.to_string().contains("XAI_API_KEY"), "{err}");
     }
 }
